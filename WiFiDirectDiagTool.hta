@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="author" content="John C.">
+  <meta name="description" content="Wi-Fi Direct and Miracast Diagnostic Tool for Windows.">
+  <meta name="keywords" content="Wi-Fi Direct, Miracast, Diagnostics, HTA, PowerShell, Windows">
+  <meta name="version" content="1.0">
+  <title>Wi-Fi Diagnostic Tool</title>
+  <HTA:APPLICATION 
+    ID="WiFiDiag"
+    APPLICATIONNAME="WiFi Diagnostic"
+    BORDER="thin"
+    SCROLL="no"
+    SINGLEINSTANCE="yes"
+    WINDOWSTATE="normal"
+  >
+  <script language="javascript">
+    function writeScript(fileName, content) {
+      var fso = new ActiveXObject("Scripting.FileSystemObject");
+      var shell = new ActiveXObject("WScript.Shell");
+      var tempPath = shell.ExpandEnvironmentStrings("%TEMP%");
+      var file = fso.CreateTextFile(tempPath + "\\" + fileName, true);
+      file.Write(content);
+      file.Close();
+    }
+
+    function runPowerShellScript(scriptName) {
+      try {
+        var shell = new ActiveXObject("WScript.Shell");
+        var tempPath = shell.ExpandEnvironmentStrings("%TEMP%");
+        var psFile = tempPath + "\\" + scriptName;
+        var outFile = tempPath + "\\output.txt";
+
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        if (fso.FileExists(outFile)) {
+          fso.DeleteFile(outFile);
+        }
+
+        var command = "powershell.exe -ExecutionPolicy Bypass -File \"" + psFile + "\"";
+        shell.Run(command, 0, true);
+
+        var waitCount = 0;
+        while (!fso.FileExists(outFile) && waitCount < 20) {
+          WScript.Sleep(500);
+          waitCount++;
+        }
+
+        if (fso.FileExists(outFile)) {
+          var file = fso.OpenTextFile(outFile, 1);
+          var output = file.ReadAll();
+          file.Close();
+          document.getElementById("outputBox").value = output;
+        } else {
+          document.getElementById("outputBox").value = "Output file not found after execution.";
+        }
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
+    function runDiagnostics() {
+      var script = [
+        '$log = "=== Diagnostic Log ===`n$(Get-Date)`n"',
+        '$adapter = Get-NetAdapter | Where-Object {$_.Name -like "*Wi-Fi Direct*"}',
+        'if ($adapter) {',
+        '  $log += "Wi-Fi Direct Adapter Found:`n"',
+        '  $log += ($adapter | Format-Table Name, Status, InterfaceDescription | Out-String)',
+        '} else {',
+        '  $log += "Wi-Fi Direct Adapter NOT found.`n"',
+        '}',
+        '$ipConfig = Get-NetIPConfiguration | Where-Object {$_.InterfaceAlias -like "*Wi-Fi Direct*"}',
+        'if ($ipConfig) {',
+        '  $log += "`nIP Configuration:`n"',
+        '  $log += ($ipConfig | Format-List IPv4Address, IPv6Address, DNSServer, InterfaceAlias | Out-String)',
+        '} else {',
+        '  $log += "`nNo IP configuration found.`n"',
+        '}',
+        '$dxPath = "$env:TEMP\\DxDiag.txt"',
+        'Start-Process -FilePath "dxdiag.exe" -ArgumentList "/t $dxPath" -Wait',
+        '$miracast = Select-String -Path $dxPath -Pattern "Miracast"',
+        'if ($miracast) {',
+        '  $log += "`nMiracast Readiness:`n"',
+        '  $log += ($miracast | Out-String)',
+        '} else {',
+        '  $log += "`nMiracast status not found.`n"',
+        '}',
+        '$log | Out-File "$env:TEMP\\output.txt" -Encoding ASCII'
+      ].join("\n");
+      writeScript("diagnostics.ps1", script);
+      runPowerShellScript("diagnostics.ps1");
+    }
+
+    function restartWLAN() {
+      var script = '"WLAN service restarted." | Out-File "$env:TEMP\\output.txt" -Encoding ASCII; Restart-Service -Name WlanSvc -Force';
+      writeScript("restartWLAN.ps1", script);
+      runPowerShellScript("restartWLAN.ps1");
+    }
+
+    function checkWLANStatus() {
+      var script = 'Get-Service -Name WlanSvc | Select-Object Status, StartType, DisplayName | Format-List | Out-File "$env:TEMP\\output.txt" -Encoding ASCII';
+      writeScript("checkWLAN.ps1", script);
+      runPowerShellScript("checkWLAN.ps1");
+    }
+  </script>
+  <style>
+    body {
+      font-family: Segoe UI, sans-serif;
+      background-color: #1e1e2f;
+      color: #e0e0e0;
+      padding: 20px;
+    }
+    h2 {
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+    p {
+      color: #cccccc;
+      margin-bottom: 20px;
+    }
+    button {
+      background-color: #3a3f5c;
+      color: #ffffff;
+      border: none;
+      padding: 10px 20px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #50577a;
+    }
+    textarea {
+      background-color: #2c2f45;
+      color: #e0e0e0;
+      border: 1px solid #444;
+      padding: 10px;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    footer {
+      margin-top: 20px;
+      font-size: 11px;
+      color: #888;
+      border-top: 1px solid #444;
+      padding-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Wi-Fi Direct + Miracast Diagnostic Tool</h2>
+  <p>This tool checks your system's readiness for Wi-Fi Direct and Miracast, and allows manual control of the WLAN AutoConfig service.</p>
+  <button onclick="runDiagnostics()">Run Diagnostics</button>
+  <button onclick="restartWLAN()">Restart WLAN Service</button>
+  <button onclick="checkWLANStatus()">Check WLAN Status</button>
+  <br><br>
+  <textarea id="outputBox" rows="25"></textarea>
+  <footer>
+    <strong>Author:</strong> John C. &nbsp; | &nbsp; <strong>Version:</strong> 1.0<br>
+    <strong>License:</strong> MIT License — Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction.<br>
+    Copyright © 2025 John C.
+  </footer>
+</body>
+</html>
